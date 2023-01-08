@@ -3,3 +3,5 @@ sklearn
 tqdm
 jupyter
 pandas
+matplotlib
+structlog
