@@ -109,6 +109,7 @@ class Trainer():
         return outputs
 
     def _train_one_epoch(self, epoch):
+        # Need to change the tqdm
         self.model.train()
         running_loss = 0.
         progress = tqdm(self.train_loader, total=len(self.train_loader))
