@@ -109,21 +109,31 @@ class Trainer():
         return outputs
 
     def _train_one_epoch(self, epoch):
+        # Need to change the tqdm
         self.model.train()
         running_loss = 0.
-        progress = tqdm(self.train_loader, total=len(self.train_loader))
-        for i, (inputs, targets) in enumerate(progress):
-            self.optimizer.zero_grad()
-            inputs = inputs.to(self.device)
-            targets = targets.to(self.device)
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, targets)
-            running_loss += loss.item()
-            loss.backward()
-            self.optimizer.step()
-            if self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
-                self.scheduler.step(epoch - 1 + i / len(self.train_loader))  # as per pytorch docs
-            del inputs, targets, outputs, loss
+        running_metric = 0.
+        # progress = tqdm(self.train_loader, total=len(self.train_loader))
+        with tqdm(self.train_loader, unit='batch') as tepoch:
+            for i, (inputs, targets) in enumerate(tepoch):
+                self.optimizer.zero_grad()
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
+                running_loss += loss.item()
+                loss.backward()
+                self.optimizer.step()
+                if self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
+                    self.scheduler.step(epoch - 1 + i / len(self.train_loader))  # as per pytorch docs
+                if self.config['metric'] != None:
+                    # TODO: calculate accuracy
+                    outputs = self._get_predictions(outputs)
+                    running_metric += self._evaluate(outputs, targets).item()
+                    tepoch.set_postfix(loss=loss.item(), metric=running_metric)
+                else:
+                    tepoch.set_postfix(loss=loss.item())
+                del inputs, targets, outputs, loss
         if self.config['scheduler'] == 'StepLR':
             self.scheduler.step()
         train_loss = running_loss / len(self.train_loader)
@@ -133,20 +143,25 @@ class Trainer():
     def _validate_one_epoch(self):
         running_loss = 0.
         running_metric = 0.
-        progress = tqdm(self.val_loader, total=len(self.val_loader))
-        for (inputs, targets) in progress:
-            inputs = inputs.to(self.device)
-            targets = targets.to(self.device)
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, targets)
-            running_loss += loss.item()
-            if self.config['metric'] != None:
-                outputs = self._get_predictions(outputs)
-                running_metric += self._evaluate(outputs, targets).item()
-            del inputs, targets, outputs, loss
+        # progress = tqdm(self.val_loader, total=len(self.val_loader))
+        with tqdm(self.val_loader, unit='batch') as tepoch:
+            for (inputs, targets) in tepoch:
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
+                running_loss += loss.item()
+                if self.config['metric'] != None:
+                    outputs = self._get_predictions(outputs)
+                    running_metric += self._evaluate(outputs, targets).item()
+                    tepoch.set_postfix(loss=loss.item(), metric=running_metric)
+                else:
+                    tepoch.set_postfix(loss=loss.item())
+                del inputs, targets, outputs, loss
         val_loss = running_loss / len(self.val_loader)
         self.val_losses.append(val_loss)
-        self.val_metrics.append(running_metric / len(self.val_loader))
+        if self.config['metric'] != None:
+            self.val_metrics.append(running_metric / len(self.val_loader))
         del running_metric
         if self.config['scheduler'] == 'ReduceLROnPlateau':
             self.scheduler.step(val_loss)
@@ -158,12 +173,13 @@ class Trainer():
 
     def fit(self):
         logger.info("Start training..")
-        fit_progress = tqdm(range(1, self.config['epochs'] + 1), leave=True, desc="Training...")
-        for epoch in fit_progress:
-            fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | training...")
+        # fit_progress = tqdm(range(1, self.config['epochs'] + 1), leave=True, desc="Training...")
+        for epoch in range(1, self.config['epochs'] + 1):
+            logger.info(f"{'-' * 30} EPOCH {epoch} / {self.config['epochs']} {'-' * 30}")
+            # fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | training...")
             self._train_one_epoch(epoch)
             self.clear()
-            fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | validating...")
+            # fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | validating...")
             self._validate_one_epoch()
             self.clear()
             # Save model on master node.
@@ -172,9 +188,11 @@ class Trainer():
                     self._save_model(self.config['model_dir'])
             else:
                 self._save_model(self.config['model_dir'])
-            logger.info(f"{'-' * 30} EPOCH {epoch} / {self.config['epochs']} {'-' * 30}")
             logger.info(f"train loss: {self.train_losses[-1]}")
-            logger.info(f"valid loss: {self.val_losses[-1]} - valid metric: {self.val_metrics[-1]}\n\n")
+            if self.config['metric'] != None:
+                logger.info(f"valid loss: {self.val_losses[-1]} - valid metric: {self.val_metrics[-1]}\n\n")
+            else:
+                logger.info(f"valid loss: {self.val_losses[-1]}\n\n")
         logger.info("Training Complete.")
 
     def test(self, test_loader):
