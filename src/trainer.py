@@ -8,9 +8,6 @@ import os
 import gc
 from tqdm import tqdm
 
-# SageMaker data parallel: Import the library PyTorch API
-# import smdistributed.dataparallel.torch.torch_smddp
-
 # SageMaker data parallel: Import PyTorch's distributed API
 import torch.distributed as dist
 
@@ -22,6 +19,9 @@ logger = structlog.get_logger('__name__')
 
 class Trainer():
     def __init__(self, model, datasets, config, is_parallel=True, backend='smddp'):
+        # SageMaker data parallel: Import the library PyTorch API
+        if is_parallel:
+            import smdistributed.dataparallel.torch.torch_smddp
         train_set, val_set = datasets
         torch.manual_seed(config['seed'])
         self.model = model
