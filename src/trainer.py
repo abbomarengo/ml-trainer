@@ -110,8 +110,8 @@ class Trainer():
         return outputs
 
     def _train_one_epoch(self, epoch):
-        # Need to change the tqdm
         self.model.train()
+        self.model = self.model.to(self.device)
         running_loss = 0.
         running_metric = 0.
         # progress = tqdm(self.train_loader, total=len(self.train_loader))
@@ -142,6 +142,7 @@ class Trainer():
 
     @torch.no_grad()
     def _validate_one_epoch(self):
+        self.model = self.model.to(self.device)
         running_loss = 0.
         running_metric = 0.
         # progress = tqdm(self.val_loader, total=len(self.val_loader))
