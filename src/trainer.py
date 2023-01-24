@@ -7,6 +7,7 @@ import structlog
 import os
 import gc
 from tqdm import tqdm
+import pickle
 
 # SageMaker data parallel: Import PyTorch's distributed API
 import torch.distributed as dist
@@ -18,7 +19,7 @@ logger = structlog.get_logger('__name__')
 
 
 class Trainer():
-    def __init__(self, model, datasets, config, is_parallel=True, backend='smddp'):
+    def __init__(self, model, datasets, config, is_parallel=True, save_history=False, backend='smddp'):
         # SageMaker data parallel: Import the library PyTorch API
         if is_parallel:
             import smdistributed.dataparallel.torch.torch_smddp
@@ -27,9 +28,12 @@ class Trainer():
         self.model = model
         self.config = config
         self.is_parallel = is_parallel
+        self.save_history = save_history
         self.train_losses = []
         self.val_losses = []
+        self.train_metrics = []
         self.val_metrics = []
+        self.history = {}
         logger.info("Loading the model.")
         if self.is_parallel:
             dist.init_process_group(backend=backend)
@@ -81,7 +85,6 @@ class Trainer():
         }
         if self.config['scheduler'] != None:
             self.scheduler = self.scheduler_options[self.config['scheduler']]
-
 
     def _get_optimizer(self):
         if self.config['optimizer'] == 'sgd':
@@ -139,6 +142,9 @@ class Trainer():
             self.scheduler.step()
         train_loss = running_loss / len(self.train_loader)
         self.train_losses.append(train_loss)
+        if self.config['metric'] != None:
+            self.train_metrics.append(running_metric / len(self.train_loader))
+        del running_metric
 
     @torch.no_grad()
     def _validate_one_epoch(self):
@@ -173,6 +179,12 @@ class Trainer():
         path = os.path.join(model_dir, "model.pth")
         torch.save(self.model.cpu().state_dict(), path)
 
+    def _save_history(self, model_dir):
+        logger.info("Saving the training history.")
+        path = os.path.join(model_dir, 'history', "history.pkl")
+        with open(path, "wb") as fp:
+            pickle.dump(self.history, fp)
+
     def fit(self):
         logger.info("Start training..")
         # fit_progress = tqdm(range(1, self.config['epochs'] + 1), leave=True, desc="Training...")
@@ -195,6 +207,15 @@ class Trainer():
                 logger.info(f"valid loss: {self.val_losses[-1]} - valid metric: {self.val_metrics[-1]}\n\n")
             else:
                 logger.info(f"valid loss: {self.val_losses[-1]}\n\n")
+        self.history = {
+            'epochs': [*range(1, self.config['epochs'] + 1)]
+            'train_loss': self.train_losses,
+            'val_loss': self.val_losses,
+            'train_metric': self.train_metrics,
+            'val_metric': self.val_metrics
+        }
+        if self.save_history:
+            self._save_history(self.config['model_dir'])
         logger.info("Training Complete.")
 
     def test(self, test_loader):

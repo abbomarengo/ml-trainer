@@ -1,7 +1,8 @@
 torch
-sklearn
 tqdm
 jupyter
-pandas
 matplotlib
 structlog
+awscli
+boto3
+sagemaker
