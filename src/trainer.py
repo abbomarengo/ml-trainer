@@ -208,11 +208,12 @@ class Trainer():
             else:
                 logger.info(f"valid loss: {self.val_losses[-1]}\n\n")
         self.history = {
-            'epochs': [*range(1, self.config['epochs'] + 1)]
+            'epochs': [*range(1, self.config['epochs'] + 1)],
             'train_loss': self.train_losses,
             'val_loss': self.val_losses,
             'train_metric': self.train_metrics,
-            'val_metric': self.val_metrics
+            'val_metric': self.val_metrics,
+            'metric_type': self.config['metric']
         }
         if self.save_history:
             self._save_history(self.config['model_dir'])
