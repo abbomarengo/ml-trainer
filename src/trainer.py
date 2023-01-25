@@ -42,13 +42,14 @@ class Trainer():
             # Scale batch size by world size
             batch_size = config['batch_size'] // dist.get_world_size()
             batch_size = max(batch_size, 1)
-            assert torch.device("cuda" if torch.cuda.is_available() else "cpu") == "cuda", \
-                "Need GPU availability for data parallelism."
-            self.device = torch.device("cuda")
+            # assert torch.device("cuda" if torch.cuda.is_available() else "cpu") == "cuda", \
+            #     "Need GPU availability for data parallelism."
+            # self.device = torch.device("cuda")
         else:
             train_sampler = None
             batch_size = config['batch_size']
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f'Training on devide: {self.device}.')
         logger.info('Loading training and validation set.')
         logger.info("Preparing the data.")
         self.train_loader = Loader(train_set, batch_size=batch_size, shuffle=train_sampler is None,
