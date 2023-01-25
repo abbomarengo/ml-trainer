@@ -4,20 +4,28 @@ import json
 import torchvision
 from src.model import MLModel
 from src.trainer import Trainer
-from src.utils.functions import custom_pre_process_function
 
 
 def main(args):
     # Insert CODE HERE:
     # EXAMPLE
-    train_set = torchvision.datasets.CIFAR10(root=args.data_dir,
-                                             train=True,
-                                             download=False,
-                                             transform=custom_pre_process_function())
-    val_set = torchvision.datasets.CIFAR10(root=args.data_dir,
-                                           train=False,
-                                           download=False,
-                                           transform=custom_pre_process_function())
+    if args.custom_function:
+        from src.utils.functions import custom_pre_process_function
+        train_set = torchvision.datasets.CIFAR10(root=args.data_dir,
+                                                 train=True,
+                                                 download=False,
+                                                 transform=custom_pre_process_function())
+        val_set = torchvision.datasets.CIFAR10(root=args.data_dir,
+                                               train=False,
+                                               download=False,
+                                               transform=custom_pre_process_function())
+    else:
+        train_set = torchvision.datasets.CIFAR10(root=args.data_dir,
+                                                 train=True,
+                                                 download=False)
+        val_set = torchvision.datasets.CIFAR10(root=args.data_dir,
+                                               train=False,
+                                               download=False)
     datasets = (train_set, val_set)
     model = MLModel()
     config = {
@@ -32,7 +40,7 @@ def main(args):
         'metric': args.metric,
         'model_dir': args.model_dir
     }
-    trainer = Trainer(model, datasets, config, is_parallel=True, backend=args.backend)
+    trainer = Trainer(model, datasets, config, is_parallel=True, save_history=True, backend=args.backend)
     trainer.fit()
 
 
