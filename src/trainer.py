@@ -49,7 +49,7 @@ class Trainer():
             train_sampler = None
             batch_size = config['batch_size']
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f'Training on devide: {self.device}.')
+        logger.info(f'Training on device: {self.device}.')
         logger.info('Loading training and validation set.')
         logger.info("Preparing the data.")
         self.train_loader = Loader(train_set, batch_size=batch_size, shuffle=train_sampler is None,
