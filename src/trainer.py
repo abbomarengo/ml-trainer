@@ -182,7 +182,7 @@ class Trainer():
 
     def _save_history(self, model_dir):
         logger.info("Saving the training history.")
-        path = os.path.join(model_dir, 'history', "history.pkl")
+        path = os.path.join(model_dir, "history.pkl")
         with open(path, "wb") as fp:
             pickle.dump(self.history, fp)
 

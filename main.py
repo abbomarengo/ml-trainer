@@ -4,6 +4,7 @@ import json
 import torchvision
 from src.model import MLModel
 from src.trainer import Trainer
+from src.utils.utils import plot_history
 
 
 def main(args):
@@ -42,6 +43,8 @@ def main(args):
     }
     trainer = Trainer(model, datasets, config, is_parallel=True, save_history=True, backend=args.backend)
     trainer.fit()
+    history = trainer.history
+    plot_history(history)
 
 
 if __name__ == "__main__":
