@@ -37,6 +37,7 @@ def main(args):
         'momentum': args.momentum,
         'lr': args.lr,
         'criterion': args.criterion,
+        'pred_function': args.pred_function,
         'metric': args.metric,
         'model_dir': args.model_dir
     }
@@ -69,6 +70,8 @@ if __name__ == "__main__":
                         help="backend for dist. training, this script only supports gloo")
     parser.add_argument("--custom_function", type=bool, default=False,
                         help="apply a pre-processing function (default: False)")
+    parser.add_argument("--pred_function", type=str, default=None,
+                        help="probability function to apply to make predictions (default: None)")
 
     # SageMaker environment
     parser.add_argument("--hosts", type=list, default=json.loads(os.environ["SM_HOSTS"]))

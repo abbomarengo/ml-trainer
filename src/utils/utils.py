@@ -28,6 +28,8 @@ def plot_history(history: dict) -> None:
         axes[1].set_ylabel(history['metric_type'])
         axes[0].set_title('Training Loss vs. Validation Loss')
         axes[1].set_title(f"{history['metric_type']} - Training vs. Validation")
+        axes[0].legend()
+        axes[1].legend()
     else:
         plt.subplots(figsize=(10, 5))
         plt.plot(x, train_loss, c='C0', label='train')
@@ -36,6 +38,6 @@ def plot_history(history: dict) -> None:
         plt.xlabel("Epochs")
         plt.ylabel('Loss')
         plt.title('Training Loss vs. Validation Loss')
-    plt.legend()
+        plt.legend()
     plt.tight_layout()
     plt.show()
