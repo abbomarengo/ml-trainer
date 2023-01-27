@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import distributed
-from torch.nn import parallel
+from torch.nn import parallel, LogSoftmax, Softmax
 from torch import optim
 from sklearn.metrics import accuracy_score
 import structlog
@@ -86,6 +86,15 @@ class Trainer():
         }
         if self.config['scheduler'] != None:
             self.scheduler = self.scheduler_options[self.config['scheduler']]
+        self.pred_function = self._get_prediction_function()
+
+    def _get_prediction_function(self):
+        if self.config['pred_function'] == 'logsoftmax':
+            return LogSoftmax(dim=-1)
+        elif self.config['pred_function'] == 'softmax':
+            return Softmax(dim=-1)
+        else:
+            return None
 
     def _get_optimizer(self):
         if self.config['optimizer'] == 'sgd':
@@ -108,10 +117,14 @@ class Trainer():
             colwise_mse = torch.mean(torch.square(targets - outputs), dim=0)
             return torch.mean(torch.sqrt(colwise_mse), dim=0)
         if self.config['metric'] == 'accuracy':
-            return accuracy_score(targets, outputs)
+            predictions = self._get_predictions(outputs)
+            return accuracy_score(targets.detach().numpy(), predictions.detach().numpy())
 
     def _get_predictions(self, outputs):
-        return outputs
+        if self.config['pred_function'] != None:
+            return torch.argmax(self.pred_function(outputs), dim=-1)
+        else:
+            return torch.argmax(outputs, dim=-1)
 
     def _train_one_epoch(self, epoch):
         self.model.train()
@@ -133,9 +146,10 @@ class Trainer():
                     self.scheduler.step(epoch - 1 + i / len(self.train_loader))  # as per pytorch docs
                 if self.config['metric'] != None:
                     # TODO: calculate accuracy
-                    outputs = self._get_predictions(outputs)
-                    running_metric += self._evaluate(outputs, targets).item()
-                    tepoch.set_postfix(loss=loss.item(), metric=running_metric)
+                    # outputs = self._get_predictions(outputs)
+                    running_metric += self._evaluate(outputs, targets)
+                    tepoch.set_postfix(loss=running_loss / len(self.train_loader),
+                                       metric=running_metric / len(self.train_loader))
                 else:
                     tepoch.set_postfix(loss=loss.item())
                 del inputs, targets, outputs, loss
@@ -161,9 +175,10 @@ class Trainer():
                 loss = self.criterion(outputs, targets)
                 running_loss += loss.item()
                 if self.config['metric'] != None:
-                    outputs = self._get_predictions(outputs)
-                    running_metric += self._evaluate(outputs, targets).item()
-                    tepoch.set_postfix(loss=loss.item(), metric=running_metric)
+                    # outputs = self._get_predictions(outputs)
+                    running_metric += self._evaluate(outputs, targets)
+                    tepoch.set_postfix(loss=running_loss / len(self.val_loader),
+                                       metric=running_metric / len(self.val_loader))
                 else:
                     tepoch.set_postfix(loss=loss.item())
                 del inputs, targets, outputs, loss
@@ -175,12 +190,12 @@ class Trainer():
         if self.config['scheduler'] == 'ReduceLROnPlateau':
             self.scheduler.step(val_loss)
 
-    def _save_model(self, model_dir):
+    def save_model(self, model_dir):
         logger.info("Saving the model.")
         path = os.path.join(model_dir, "model.pth")
         torch.save(self.model.cpu().state_dict(), path)
 
-    def _save_history(self, model_dir):
+    def save_history_(self, model_dir):
         logger.info("Saving the training history.")
         path = os.path.join(model_dir, "history.pkl")
         with open(path, "wb") as fp:
@@ -200,13 +215,16 @@ class Trainer():
             # Save model on master node.
             if self.is_parallel:
                 if dist.get_rank() == 0:
-                    self._save_model(self.config['model_dir'])
+                    self.save_model(self.config['model_dir'])
             else:
-                self._save_model(self.config['model_dir'])
-            logger.info(f"train loss: {self.train_losses[-1]}")
+                self.save_model(self.config['model_dir'])
             if self.config['metric'] != None:
-                logger.info(f"valid loss: {self.val_losses[-1]} - valid metric: {self.val_metrics[-1]}\n\n")
+                logger.info(f"train loss: {self.train_losses[-1]} - "
+                            f"train {self.config['metric']}: {self.train_metrics[-1]}")
+                logger.info(f"valid loss: {self.val_losses[-1]} - "
+                            f"valid {self.config['metric']}: {self.val_metrics[-1]}\n\n")
             else:
+                logger.info(f"train loss: {self.train_losses[-1]}")
                 logger.info(f"valid loss: {self.val_losses[-1]}\n\n")
         self.history = {
             'epochs': [*range(1, self.config['epochs'] + 1)],
@@ -217,7 +235,7 @@ class Trainer():
             'metric_type': self.config['metric']
         }
         if self.save_history:
-            self._save_history(self.config['model_dir'])
+            self.save_history_(self.config['model_dir'])
         logger.info("Training Complete.")
 
     def test(self, test_loader):
