@@ -118,7 +118,7 @@ class Trainer():
             return torch.mean(torch.sqrt(colwise_mse), dim=0)
         if self.config['metric'] == 'accuracy':
             predictions = self._get_predictions(outputs)
-            return accuracy_score(targets.detach().numpy(), predictions.detach().numpy())
+            return accuracy_score(targets.cpu().detach().numpy(), predictions.cpu().detach().numpy())
 
     def _get_predictions(self, outputs):
         if self.config['pred_function'] != None:
