@@ -1,12 +1,17 @@
 import pickle
 import os
 from matplotlib import pyplot as plt
+import torch
 
 
 def load_history(model_dir):
     path = os.path.join(model_dir, 'history', "history.pkl")
     history = pickle.load(open(path, "rb"))
     return history
+
+
+def load_model(model, PATH):
+    return model.load_state_dict(torch.load(PATH))
 
 
 def plot_history(history: dict) -> None:

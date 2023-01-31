@@ -19,7 +19,7 @@ logger = structlog.get_logger('__name__')
 
 
 class Trainer():
-    def __init__(self, model, datasets, config, is_parallel=True, save_history=False, backend='smddp'):
+    def __init__(self, model, datasets, config, is_parallel=False, save_history=False, backend='smddp'):
         # SageMaker data parallel: Import the library PyTorch API
         if is_parallel:
             import smdistributed.dataparallel.torch.torch_smddp
@@ -145,8 +145,6 @@ class Trainer():
                 if self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
                     self.scheduler.step(epoch - 1 + i / len(self.train_loader))  # as per pytorch docs
                 if self.config['metric'] != None:
-                    # TODO: calculate accuracy
-                    # outputs = self._get_predictions(outputs)
                     running_metric += self._evaluate(outputs, targets)
                     tepoch.set_postfix(loss=running_loss / len(self.train_loader),
                                        metric=running_metric / len(self.train_loader))
@@ -163,6 +161,7 @@ class Trainer():
 
     @torch.no_grad()
     def _validate_one_epoch(self):
+        self.model.eval()
         self.model = self.model.to(self.device)
         running_loss = 0.
         running_metric = 0.
@@ -187,8 +186,6 @@ class Trainer():
         if self.config['metric'] != None:
             self.val_metrics.append(running_metric / len(self.val_loader))
         del running_metric
-        if self.config['scheduler'] == 'ReduceLROnPlateau':
-            self.scheduler.step(val_loss)
 
     def save_model(self, model_dir):
         logger.info("Saving the model.")
@@ -238,14 +235,31 @@ class Trainer():
             self.save_history_(self.config['model_dir'])
         logger.info("Training Complete.")
 
-    def test(self, test_loader):
-        preds = []
-        for (inputs) in test_loader:
-            inputs = {k: inputs[k].to(self.device) for k in inputs.keys()}
-            outputs = self.model(inputs)
-            preds.append(outputs.detach().cpu())
-        preds = torch.concat(preds)
-        return preds
+    def test(self, model, test_loader):
+        logger.info("Testing..")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        running_loss = 0.
+        running_metric = 0.
+        with tqdm(test_loader, unit='batch') as tepoch:
+            for (inputs, targets) in tepoch:
+                inputs = inputs.to(device)
+                targets = targets.to(device)
+                outputs = model(inputs)
+                loss = self.criterion(outputs, targets)
+                running_loss += loss.item()
+                if self.config['metric'] != None:
+                    running_metric += self._evaluate(outputs, targets)
+                    tepoch.set_postfix(loss=running_loss / len(test_loader),
+                                       metric=running_metric / len(test_loader))
+                else:
+                    tepoch.set_postfix(loss=loss.item())
+                del inputs, targets, outputs, loss
+        test_loss = running_loss / len(test_loader)
+        if self.config['metric'] != None:
+            test_metric = running_metric / len(test_loader)
+            return test_loss, test_metric
+        return test_loss
 
     def clear(self):
         gc.collect()
