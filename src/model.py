@@ -3,6 +3,7 @@ from torch.nn import Module
 from torch.nn import functional as F
 from torch import nn
 
+
 class MLModel(Module):
     def __init__(self):
         super(MLModel, self).__init__()

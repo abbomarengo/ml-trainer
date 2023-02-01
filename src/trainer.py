@@ -14,6 +14,7 @@ import torch.distributed as dist
 
 # Local import
 from .dataloader import Loader
+from .utils.functions import custom_loss_function
 
 logger = structlog.get_logger('__name__')
 
@@ -103,6 +104,8 @@ class Trainer():
     def _get_criterion(self):
         if self.config['criterion'] == 'cross_entropy':
             return torch.nn.CrossEntropyLoss()
+        if self.config['criterion'] == 'custom':
+            return custom_loss_function
 
     def _average_gradients(self):
         # Average gradients (only for multi-node CPU)
