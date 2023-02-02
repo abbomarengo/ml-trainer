@@ -99,11 +99,30 @@ class Trainer():
 
     def _get_optimizer(self):
         if self.config['optimizer'] == 'sgd':
-            return optim.SGD(self.model.parameters(), lr=self.config['lr'], momentum=self.config['momentum'])
+            return optim.SGD(self.model.parameters(), lr=self.config['lr'],
+                             momentum=self.config['momentum'], weight_decay=self.config['weight_decay'])
+        if self.config['optimizer'] == 'adam':
+            return optim.Adam(self.model.parameters(), lr=self.config['lr'],
+                              weight_decay=self.config['weight_decay'])
+        if self.config['optimizer'] == 'adagrad':
+            return optim.Adagrad(self.model.parameters(), lr=self.config['lr'],
+                                 weight_decay=self.config['weight_decay'])
+        if self.config['optimizer'] == 'adamax':
+            return optim.Adamax(self.model.parameters(), lr=self.config['lr'],
+                                weight_decay=self.config['weight_decay'])
+        if self.config['optimizer'] == 'adamw':
+            return optim.AdamW(self.model.parameters(), lr=self.config['lr'],
+                               weight_decay=self.config['weight_decay'])
 
     def _get_criterion(self):
         if self.config['criterion'] == 'cross_entropy':
             return torch.nn.CrossEntropyLoss()
+        if self.config['criterion'] == 'neg-loss':
+            return torch.nn.NLLLoss
+        if self.config['criterion'] == 'l1':
+            return torch.nn.L1Loss()
+        if self.config['criterion'] == 'l2':
+            return torch.nn.MSELoss
         if self.config['criterion'] == 'custom':
             return custom_loss_function
 

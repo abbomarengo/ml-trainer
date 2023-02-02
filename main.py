@@ -35,6 +35,7 @@ def main(args):
         'scheduler': args.scheduler,
         'optimizer': args.optimizer,
         'momentum': args.momentum,
+        'weight_decay': args.weight_decay,
         'lr': args.lr,
         'criterion': args.criterion,
         'pred_function': args.pred_function,
@@ -57,7 +58,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001,
                         help="learning rate (default: 0.010)")
     parser.add_argument("--momentum", type=float, default=0.9,
-                        help="SGD momentum (default: 0.9)")
+                        help="Optimizer momentum (default: 0.9)")
+    parser.add_argument("--weight_decay", type=float, default=0.0,
+                        help="Optimizer weight decay (default: 0.0)")
     parser.add_argument("--seed", type=int, default=32,
                         help="random seed (default: 32)")
     parser.add_argument("--scheduler", type=str, default=None,
