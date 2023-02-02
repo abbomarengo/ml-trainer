@@ -56,7 +56,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", type=str, default='sgd',
                         help="optimizer for backward pass (default: sgd)")
     parser.add_argument("--lr", type=float, default=0.001,
-                        help="learning rate (default: 0.010)")
+                        help="learning rate (default: 0.001)")
     parser.add_argument("--momentum", type=float, default=0.9,
                         help="Optimizer momentum (default: 0.9)")
     parser.add_argument("--weight_decay", type=float, default=0.0,
