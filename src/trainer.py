@@ -14,19 +14,38 @@ import torch.distributed as dist
 
 # Local import
 from .dataloader import Loader
+from .utils.functions import custom_loss_function
 
 logger = structlog.get_logger('__name__')
 
 
 class Trainer():
-    def __init__(self, model, datasets, config, is_parallel=True, save_history=False, backend='smddp'):
+    def __init__(self, model, datasets=None, epochs=None, batch_size=None,
+                 is_parallel=False, save_history=False, **config):
+        logger.info('Config inputs.', config=config)
+        allowed_kwargs = {"seed", "scheduler", "optimizer", "momentum", "weight_decay",
+                          "lr", "criterion", "metric", "pred_function", "model_dir", "backend"}
+        self.validate_kwargs(config, allowed_kwargs)
+        # Unpack kwargs
+        self.epochs = epochs
+        self.scheduler_type = config.get('scheduler', None)
+        self.optimizer_type = config.get('optimizer', 'sgd')
+        self.momentum = config.get('momentum', 0.9)
+        self.weight_decay = config.get('weight_decay', 0.0)
+        self.lr = config.get('lr', 0.001)
+        self.criterion_type = config.get('criterion', 'cross_entropy')
+        self.metric = config.get('metric', 'accuracy')
+        self.pred_function_type = config.get('pred_function', 'softmax')
+        self.model_dir = config.get('model_dir', 'model_output')
+        backend = config.get('backend', 'smddp')
+        seed = config.get('seed', 32)
         # SageMaker data parallel: Import the library PyTorch API
         if is_parallel:
             import smdistributed.dataparallel.torch.torch_smddp
-        train_set, val_set = datasets
-        torch.manual_seed(config['seed'])
+        if datasets:
+            train_set, val_set = datasets
+        torch.manual_seed(seed)
         self.model = model
-        self.config = config
         self.is_parallel = is_parallel
         self.save_history = save_history
         self.train_losses = []
@@ -36,39 +55,44 @@ class Trainer():
         self.history = {}
         logger.info("Loading the model.")
         if self.is_parallel:
-            dist.init_process_group(backend=backend)
-            train_sampler = distributed.DistributedSampler(train_set, num_replicas=dist.get_world_size(),
-                                                           rank=dist.get_rank())
-            # Scale batch size by world size
-            batch_size = config['batch_size'] // dist.get_world_size()
-            batch_size = max(batch_size, 1)
-            # assert torch.device("cuda" if torch.cuda.is_available() else "cpu") == "cuda", \
-            #     "Need GPU availability for data parallelism."
-            # self.device = torch.device("cuda")
+            if datasets:
+                dist.init_process_group(backend=backend)
+                train_sampler = distributed.DistributedSampler(train_set, num_replicas=dist.get_world_size(),
+                                                               rank=dist.get_rank())
+                # Scale batch size by world size
+                batch_size = batch_size // dist.get_world_size()
+                batch_size = max(batch_size, 1)
+            else:
+                logger.warning("Testing only available. No datasets in arguments.")
         else:
-            train_sampler = None
-            batch_size = config['batch_size']
+            if datasets:
+                train_sampler = None
+            else:
+                logger.warning("Testing only available. No datasets in arguments.")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f'Training on device: {self.device}.')
-        logger.info('Loading training and validation set.')
-        logger.info("Preparing the data.")
-        self.train_loader = Loader(train_set, batch_size=batch_size, shuffle=train_sampler is None,
-                                   sampler=train_sampler)
-        self.val_loader = Loader(val_set, batch_size=batch_size, shuffle=True)
-        logger.debug(
-            "Processes {}/{} ({:.0f}%) of train data".format(
-                len(self.train_loader.sampler),
-                len(self.train_loader.dataset),
-                100.0 * len(self.train_loader.sampler) / len(self.train_loader.dataset),
+        if datasets:
+            logger.info('Loading training and validation set.')
+            logger.info("Preparing the data.")
+            self.train_loader = Loader(train_set, batch_size=batch_size, shuffle=train_sampler is None,
+                                       sampler=train_sampler)
+            self.val_loader = Loader(val_set, batch_size=batch_size, shuffle=True)
+            logger.debug(
+                "Processes {}/{} ({:.0f}%) of train data".format(
+                    len(self.train_loader.sampler),
+                    len(self.train_loader.dataset),
+                    100.0 * len(self.train_loader.sampler) / len(self.train_loader.dataset),
+                )
             )
-        )
-        logger.debug(
-            "Processes {}/{} ({:.0f}%) of validation data".format(
-                len(self.val_loader.sampler),
-                len(self.val_loader.dataset),
-                100.0 * len(self.val_loader.sampler) / len(self.val_loader.dataset),
+            logger.debug(
+                "Processes {}/{} ({:.0f}%) of validation data".format(
+                    len(self.val_loader.sampler),
+                    len(self.val_loader.dataset),
+                    100.0 * len(self.val_loader.sampler) / len(self.val_loader.dataset),
+                )
             )
-        )
+        else:
+            logger.warning("Testing only available. No datasets in arguments.")
         self.model = self.model.to(self.device)
         if self.is_parallel:
             self.model = parallel.DistributedDataParallel(self.model)
@@ -84,25 +108,46 @@ class Trainer():
             'ReduceLROnPlateau': torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', min_lr=1e-7),
             'StepLR': torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=2)
         }
-        if self.config['scheduler'] != None:
-            self.scheduler = self.scheduler_options[self.config['scheduler']]
+        if self.scheduler_type:
+            self.scheduler = self.scheduler_options[self.scheduler_type]
         self.pred_function = self._get_prediction_function()
 
     def _get_prediction_function(self):
-        if self.config['pred_function'] == 'logsoftmax':
+        if self.pred_function_type == 'logsoftmax':
             return LogSoftmax(dim=-1)
-        elif self.config['pred_function'] == 'softmax':
+        elif self.pred_function_type == 'softmax':
             return Softmax(dim=-1)
         else:
             return None
 
     def _get_optimizer(self):
-        if self.config['optimizer'] == 'sgd':
-            return optim.SGD(self.model.parameters(), lr=self.config['lr'], momentum=self.config['momentum'])
+        if self.optimizer_type == 'sgd':
+            return optim.SGD(self.model.parameters(), lr=self.lr,
+                             momentum=self.momentum, weight_decay=self.weight_decay)
+        if self.optimizer_type == 'adam':
+            return optim.Adam(self.model.parameters(), lr=self.lr,
+                              weight_decay=self.weight_decay)
+        if self.optimizer_type == 'adagrad':
+            return optim.Adagrad(self.model.parameters(), lr=self.lr,
+                                 weight_decay=self.weight_decay)
+        if self.optimizer_type == 'adamax':
+            return optim.Adamax(self.model.parameters(), lr=self.lr,
+                                weight_decay=self.weight_decay)
+        if self.optimizer_type == 'adamw':
+            return optim.AdamW(self.model.parameters(), lr=self.lr,
+                               weight_decay=self.weight_decay)
 
     def _get_criterion(self):
-        if self.config['criterion'] == 'cross_entropy':
+        if self.criterion_type == 'cross_entropy':
             return torch.nn.CrossEntropyLoss()
+        if self.criterion_type == 'neg-loss':
+            return torch.nn.NLLLoss
+        if self.criterion_type == 'l1':
+            return torch.nn.L1Loss()
+        if self.criterion_type == 'l2':
+            return torch.nn.MSELoss
+        if self.criterion_type == 'custom':
+            return custom_loss_function
 
     def _average_gradients(self):
         # Average gradients (only for multi-node CPU)
@@ -113,15 +158,15 @@ class Trainer():
             param.grad.data /= size
 
     def _evaluate(self, outputs, targets):
-        if self.config['metric'] == 'mcrmse':
+        if self.metric == 'mcrmse':
             colwise_mse = torch.mean(torch.square(targets - outputs), dim=0)
             return torch.mean(torch.sqrt(colwise_mse), dim=0)
-        if self.config['metric'] == 'accuracy':
+        if self.metric == 'accuracy':
             predictions = self._get_predictions(outputs)
             return accuracy_score(targets.cpu().detach().numpy(), predictions.cpu().detach().numpy())
 
     def _get_predictions(self, outputs):
-        if self.config['pred_function'] != None:
+        if self.pred_function_type:
             return torch.argmax(self.pred_function(outputs), dim=-1)
         else:
             return torch.argmax(outputs, dim=-1)
@@ -131,7 +176,6 @@ class Trainer():
         self.model = self.model.to(self.device)
         running_loss = 0.
         running_metric = 0.
-        # progress = tqdm(self.train_loader, total=len(self.train_loader))
         with tqdm(self.train_loader, unit='batch') as tepoch:
             for i, (inputs, targets) in enumerate(tepoch):
                 self.optimizer.zero_grad()
@@ -142,31 +186,29 @@ class Trainer():
                 running_loss += loss.item()
                 loss.backward()
                 self.optimizer.step()
-                if self.config['scheduler'] == 'CosineAnnealingWarmRestarts':
+                if self.scheduler_type == 'CosineAnnealingWarmRestarts':
                     self.scheduler.step(epoch - 1 + i / len(self.train_loader))  # as per pytorch docs
-                if self.config['metric'] != None:
-                    # TODO: calculate accuracy
-                    # outputs = self._get_predictions(outputs)
+                if self.metric:
                     running_metric += self._evaluate(outputs, targets)
                     tepoch.set_postfix(loss=running_loss / len(self.train_loader),
                                        metric=running_metric / len(self.train_loader))
                 else:
                     tepoch.set_postfix(loss=loss.item())
                 del inputs, targets, outputs, loss
-        if self.config['scheduler'] == 'StepLR':
+        if self.scheduler_type == 'StepLR':
             self.scheduler.step()
         train_loss = running_loss / len(self.train_loader)
         self.train_losses.append(train_loss)
-        if self.config['metric'] != None:
+        if self.metric:
             self.train_metrics.append(running_metric / len(self.train_loader))
         del running_metric
 
     @torch.no_grad()
     def _validate_one_epoch(self):
+        self.model.eval()
         self.model = self.model.to(self.device)
         running_loss = 0.
         running_metric = 0.
-        # progress = tqdm(self.val_loader, total=len(self.val_loader))
         with tqdm(self.val_loader, unit='batch') as tepoch:
             for (inputs, targets) in tepoch:
                 inputs = inputs.to(self.device)
@@ -174,8 +216,7 @@ class Trainer():
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
                 running_loss += loss.item()
-                if self.config['metric'] != None:
-                    # outputs = self._get_predictions(outputs)
+                if self.metric:
                     running_metric += self._evaluate(outputs, targets)
                     tepoch.set_postfix(loss=running_loss / len(self.val_loader),
                                        metric=running_metric / len(self.val_loader))
@@ -184,11 +225,9 @@ class Trainer():
                 del inputs, targets, outputs, loss
         val_loss = running_loss / len(self.val_loader)
         self.val_losses.append(val_loss)
-        if self.config['metric'] != None:
+        if self.metric:
             self.val_metrics.append(running_metric / len(self.val_loader))
         del running_metric
-        if self.config['scheduler'] == 'ReduceLROnPlateau':
-            self.scheduler.step(val_loss)
 
     def save_model(self, model_dir):
         logger.info("Saving the model.")
@@ -203,50 +242,70 @@ class Trainer():
 
     def fit(self):
         logger.info("Start training..")
-        # fit_progress = tqdm(range(1, self.config['epochs'] + 1), leave=True, desc="Training...")
-        for epoch in range(1, self.config['epochs'] + 1):
-            logger.info(f"{'-' * 30} EPOCH {epoch} / {self.config['epochs']} {'-' * 30}")
-            # fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | training...")
+        for epoch in range(1, self.epochs + 1):
+            logger.info(f"{'-' * 30} EPOCH {epoch} / {self.epochs} {'-' * 30}")
             self._train_one_epoch(epoch)
             self.clear()
-            # fit_progress.set_description(f"EPOCH {epoch} / {self.config['epochs']} | validating...")
             self._validate_one_epoch()
             self.clear()
             # Save model on master node.
             if self.is_parallel:
                 if dist.get_rank() == 0:
-                    self.save_model(self.config['model_dir'])
+                    self.save_model(self.model_dir)
             else:
-                self.save_model(self.config['model_dir'])
-            if self.config['metric'] != None:
+                self.save_model(self.model_dir)
+            if self.metric:
                 logger.info(f"train loss: {self.train_losses[-1]} - "
-                            f"train {self.config['metric']}: {self.train_metrics[-1]}")
+                            f"train {self.metric}: {self.train_metrics[-1]}")
                 logger.info(f"valid loss: {self.val_losses[-1]} - "
-                            f"valid {self.config['metric']}: {self.val_metrics[-1]}\n\n")
+                            f"valid {self.metric}: {self.val_metrics[-1]}\n\n")
             else:
                 logger.info(f"train loss: {self.train_losses[-1]}")
                 logger.info(f"valid loss: {self.val_losses[-1]}\n\n")
         self.history = {
-            'epochs': [*range(1, self.config['epochs'] + 1)],
+            'epochs': [*range(1, self.epochs + 1)],
             'train_loss': self.train_losses,
             'val_loss': self.val_losses,
             'train_metric': self.train_metrics,
             'val_metric': self.val_metrics,
-            'metric_type': self.config['metric']
+            'metric_type': self.metric
         }
         if self.save_history:
-            self.save_history_(self.config['model_dir'])
+            self.save_history_(self.model_dir)
         logger.info("Training Complete.")
 
-    def test(self, test_loader):
-        preds = []
-        for (inputs) in test_loader:
-            inputs = {k: inputs[k].to(self.device) for k in inputs.keys()}
-            outputs = self.model(inputs)
-            preds.append(outputs.detach().cpu())
-        preds = torch.concat(preds)
-        return preds
+    def test(self, model, test_loader):
+        logger.info("Testing..")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        running_loss = 0.
+        running_metric = 0.
+        with tqdm(test_loader, unit='batch') as tepoch:
+            for (inputs, targets) in tepoch:
+                inputs = inputs.to(device)
+                targets = targets.to(device)
+                outputs = model(inputs)
+                loss = self.criterion(outputs, targets)
+                running_loss += loss.item()
+                if self.metric:
+                    running_metric += self._evaluate(outputs, targets)
+                    tepoch.set_postfix(loss=running_loss / len(test_loader),
+                                       metric=running_metric / len(test_loader))
+                else:
+                    tepoch.set_postfix(loss=loss.item())
+                del inputs, targets, outputs, loss
+        test_loss = running_loss / len(test_loader)
+        if self.metric:
+            test_metric = running_metric / len(test_loader)
+            return test_loss, test_metric
+        return test_loss
 
     def clear(self):
         gc.collect()
         torch.cuda.empty_cache()
+
+    def validate_kwargs(self, kwargs, allowed_kwargs, error_message="Keyword argument not understood:"):
+        """Checks that all keyword arguments are in the set of allowed keys."""
+        for kwarg in kwargs:
+            if kwarg not in allowed_kwargs:
+                raise TypeError(error_message, kwarg)

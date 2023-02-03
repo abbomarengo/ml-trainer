@@ -29,19 +29,20 @@ def main(args):
     datasets = (train_set, val_set)
     model = MLModel()
     config = {
-        'epochs': args.epochs,
         'seed': args.seed,
-        'batch_size': args.batch_size,
         'scheduler': args.scheduler,
         'optimizer': args.optimizer,
         'momentum': args.momentum,
+        'weight_decay': args.weight_decay,
         'lr': args.lr,
         'criterion': args.criterion,
         'pred_function': args.pred_function,
         'metric': args.metric,
-        'model_dir': args.model_dir
+        'model_dir': args.model_dir,
+        'backend': args.backend
     }
-    trainer = Trainer(model, datasets, config, is_parallel=True, save_history=True, backend=args.backend)
+    trainer = Trainer(model, datasets=datasets, epochs=250, batch_size=32,
+                      is_parallel=True, save_history=True, **config)
     trainer.fit()
 
 
@@ -55,9 +56,11 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", type=str, default='sgd',
                         help="optimizer for backward pass (default: sgd)")
     parser.add_argument("--lr", type=float, default=0.001,
-                        help="learning rate (default: 0.010)")
+                        help="learning rate (default: 0.001)")
     parser.add_argument("--momentum", type=float, default=0.9,
-                        help="SGD momentum (default: 0.9)")
+                        help="Optimizer momentum (default: 0.9)")
+    parser.add_argument("--weight_decay", type=float, default=0.0,
+                        help="Optimizer weight decay (default: 0.0)")
     parser.add_argument("--seed", type=int, default=32,
                         help="random seed (default: 32)")
     parser.add_argument("--scheduler", type=str, default=None,
