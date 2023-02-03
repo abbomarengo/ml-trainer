@@ -29,9 +29,7 @@ def main(args):
     datasets = (train_set, val_set)
     model = MLModel()
     config = {
-        'epochs': args.epochs,
         'seed': args.seed,
-        'batch_size': args.batch_size,
         'scheduler': args.scheduler,
         'optimizer': args.optimizer,
         'momentum': args.momentum,
@@ -40,9 +38,11 @@ def main(args):
         'criterion': args.criterion,
         'pred_function': args.pred_function,
         'metric': args.metric,
-        'model_dir': args.model_dir
+        'model_dir': args.model_dir,
+        'backend': args.backend
     }
-    trainer = Trainer(model, datasets, config, is_parallel=True, save_history=True, backend=args.backend)
+    trainer = Trainer(model, datasets=datasets, epochs=250, batch_size=32,
+                      is_parallel=True, save_history=True, **config)
     trainer.fit()
 
 
